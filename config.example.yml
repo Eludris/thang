@@ -1,4 +1,4 @@
 - name: eludris-owo # list of "virtual channels"
   discord: [1034208225865764944] # list of Discord channel ids (optional)
-  eludris: [http://172.17.0.1:7159] # list of Eludris channel urls (optional)
+  eludris: https://api.eludris.gay # Eludris API URL (optional)
   revolt: [01FNYDT71YB5ZWFQ7WYBTJXANG] # list of Revolt channel ids (optional)

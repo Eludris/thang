@@ -1,14 +1,12 @@
 version: "3"
 
-x-restart-policy:
-  &restart_policy
+x-restart-policy: &restart_policy
   restart: unless-stopped
 
-x-service:
-  &service
+x-service: &service
   <<: *restart_policy
-  depends_on: [ keydb ]
-  links: [ keydb ]
+  depends_on: [keydb]
+  links: [keydb]
   pull_policy: build
   volumes:
     - ./config.yml:/config.yml
@@ -32,6 +30,7 @@ services:
     environment:
       REDIS_URL: redis://keydb:6379
       RUST_LOG: ${RUST_LOG:-INFO}
+      ELUDRIS_TOKEN: ${ELUDRIS_TOKEN?Variable ELUDRIS_TOKEN not set}
   revolt:
     <<: *service
     build:

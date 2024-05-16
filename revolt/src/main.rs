@@ -25,7 +25,7 @@ async fn main() -> Result<()> {
     let redis = redis::Client::open(redis_url)?;
     log::info!("Connected to Redis {}", redis.get_connection_info().addr);
 
-    let mut conn = redis.get_async_connection().await?;
+    let mut conn = redis.get_multiplexed_async_connection().await?;
     for channel in &config {
         if let Some(revolt) = &channel.revolt {
             for id in revolt {
@@ -44,11 +44,11 @@ async fn main() -> Result<()> {
     let bot_id = http.fetch_self().await?.id;
 
     let err = tokio::select! {
-        e = handle_redis::handle_redis(redis.get_async_connection().await?, redis.get_async_connection().await?,http.clone(), config) => {
+        e = handle_redis::handle_redis(redis.get_async_pubsub().await?, redis.get_multiplexed_async_connection().await?, http.clone(), config) => {
             log::error!("Events failed first {:?}", e);
             e
         },
-        e = handle_events::handle_events(&mut events, redis.get_async_connection().await?, bot_id, http) => {
+        e = handle_events::handle_events(&mut events, redis.get_multiplexed_async_connection().await?, bot_id, http) => {
             log::error!("Websocket failed first {:?}", e);
             e
         },

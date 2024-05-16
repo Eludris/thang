@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
     let redis = redis::Client::open(redis_url)?;
     log::info!("Connected to Redis {}", redis.get_connection_info().addr);
 
-    let mut conn = redis.get_async_connection().await?;
+    let mut conn = redis.get_multiplexed_async_connection().await?;
     for channel in &config {
         if let Some(discord) = &channel.discord {
             for id in discord {
@@ -54,14 +54,14 @@ async fn main() -> Result<()> {
     let err = tokio::select!(
         e  = handle_events::handle_events(
             &mut shard,
-            redis.get_async_connection().await?,
+            redis.get_multiplexed_async_connection().await?,
         ) => {
             log::error!("Events failed first {:?}", e);
             e
         },
         e = handle_redis::handle_redis(
-            redis.get_async_connection().await?,
-            redis.get_async_connection().await?,
+            redis.get_async_pubsub().await?,
+            redis.get_multiplexed_async_connection().await?,
             http,
             config,
             current_user,

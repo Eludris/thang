@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use models::{Event, EventData, Message, Reply, Result};
-use redis::{aio::Connection, AsyncCommands};
+use redis::{aio::MultiplexedConnection, AsyncCommands};
 use tokio::sync::Mutex;
 use twilight_gateway::{Event as GatewayEvent, Shard};
 
@@ -44,7 +44,7 @@ fn get_name(msg: &twilight_model::channel::Message) -> String {
     }
 }
 
-pub async fn handle_events(shard: &mut Shard, conn: Connection) -> Result<()> {
+pub async fn handle_events(shard: &mut Shard, conn: MultiplexedConnection) -> Result<()> {
     let conn = Arc::new(Mutex::new(conn));
     loop {
         let event = match shard.next_event().await {
@@ -98,7 +98,7 @@ pub async fn handle_events(shard: &mut Shard, conn: Connection) -> Result<()> {
                 _ => return,
             };
 
-            let mut conn: tokio::sync::MutexGuard<Connection> = conn.lock().await;
+            let mut conn = conn.lock().await;
             let channel_name = conn
                 .get::<String, Option<String>>(format!("discord:key:{}", channel_id))
                 .await

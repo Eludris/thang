@@ -5,20 +5,19 @@ use models::Config;
 use models::Event;
 use models::EventData;
 use models::Result;
-use redis::aio::Connection;
+use redis::aio::{MultiplexedConnection, PubSub};
 use redis::AsyncCommands;
 use revolt_wrapper::models::Masquerade;
 use revolt_wrapper::HttpClient;
 use tokio::sync::Mutex;
 
 pub async fn handle_redis(
-    conn_pub: Connection,
-    conn: Connection,
+    mut pubsub: PubSub,
+    conn: MultiplexedConnection,
     rest: Arc<HttpClient>,
     config: Config,
 ) -> Result<()> {
-    let conn: Arc<Mutex<Connection>> = Arc::new(Mutex::new(conn));
-    let mut pubsub = conn_pub.into_pubsub();
+    let conn = Arc::new(Mutex::new(conn));
 
     for channel in config {
         if channel.revolt.is_some() {
@@ -68,7 +67,7 @@ pub async fn handle_redis(
 
         match payload.data {
             EventData::MessageCreate(msg) => {
-                let /*mut*/ content = msg.content.clone();
+                let mut content = msg.content.clone();
 
                 // if !msg.replies.is_empty() {
                 //     let referenced = &msg.replies[0];
@@ -86,19 +85,19 @@ pub async fn handle_redis(
                 //     content = format!("\n{}\n{}", reply, content);
                 // }
 
-                // let attachments = msg
-                //     .attachments
-                //     .iter()
-                //     .map(|a| a.as_ref())
-                //     .collect::<Vec<&str>>()
-                //     .join("\n");
+                let attachments = msg
+                    .attachments
+                    .iter()
+                    .map(|a| a.as_ref())
+                    .collect::<Vec<&str>>()
+                    .join("\n");
 
-                // if !attachments.is_empty() {
-                //     if !content.is_empty() {
-                //         content.push('\n');
-                //     }
-                //     content.push_str(&attachments);
-                // }
+                if !attachments.is_empty() {
+                    if !content.is_empty() {
+                        content.push('\n');
+                    }
+                    content.push_str(&attachments);
+                }
 
                 for channel in channel_ids {
                     rest.send_message(&channel)

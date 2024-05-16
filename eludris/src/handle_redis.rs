@@ -1,16 +1,12 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
+use eludrs::todel::MessageDisguise;
 use eludrs::HttpClient;
 use futures::StreamExt;
 use models::Config;
 use models::Event;
 use models::EventData;
 use models::Result;
-use redis::aio::Connection;
-use redis::AsyncCommands;
+use redis::aio::PubSub;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct RatelimitResponse {
@@ -22,15 +18,7 @@ struct RatelimitData {
     retry_after: u64,
 }
 
-pub async fn handle_redis(
-    conn_pub: Connection,
-    conn: Connection,
-    clients: HashMap<String, HttpClient>,
-    config: Config,
-) -> Result<()> {
-    let conn: Arc<Mutex<Connection>> = Arc::new(Mutex::new(conn));
-    let mut pubsub = conn_pub.into_pubsub();
-
+pub async fn handle_redis(mut pubsub: PubSub, client: HttpClient, config: Config) -> Result<()> {
     for channel in config {
         if channel.eludris.is_some() {
             pubsub.subscribe(channel.name).await?;
@@ -39,7 +27,6 @@ pub async fn handle_redis(
     let mut pubsub = pubsub.into_on_message();
 
     while let Some(payload) = pubsub.next().await {
-        let channel_name = payload.get_channel_name();
         // TODO: handle more of the errors here
         let payload: String = match payload.get_payload() {
             Ok(payload) => payload,
@@ -56,31 +43,13 @@ pub async fn handle_redis(
             }
         };
 
-        let mut conn = conn.lock().await;
-        let urls = conn
-            .smembers::<_, Option<Vec<String>>>(format!("eludris:instances:{}", channel_name))
-            .await?;
-        let required_clients = if let Some(urls) = urls {
-            let mut required_clients = Vec::new();
-            for url in urls {
-                if payload.platform == "eludris" && url == payload.identifier {
-                    continue;
-                }
-                required_clients.push(clients.get(&url).unwrap());
-            }
-            required_clients
-        } else {
-            log::warn!("No instance URL found for channel {}", channel_name);
+        if payload.platform == "eludris" {
+            // As only one url and channel can exist after refactor but before channels.
             continue;
-        };
+        }
 
         match payload.data {
             EventData::MessageCreate(msg) => {
-                let mut name = format!("Bridge-{}", &msg.author);
-                if name.len() > 32 {
-                    name = name.drain(..32).collect();
-                }
-
                 let mut content = msg.content.clone();
 
                 if !msg.replies.is_empty() {
@@ -102,8 +71,8 @@ pub async fn handle_redis(
                 let attachments = msg
                     .attachments
                     .iter()
-                    .map(|a| a.as_ref())
-                    .collect::<Vec<&str>>()
+                    .map(|a| format!("![]({})", a))
+                    .collect::<Vec<String>>()
                     .join("\n");
 
                 if !attachments.is_empty() {
@@ -119,10 +88,15 @@ pub async fn handle_redis(
                     continue;
                 }
 
-                log::debug!("Sending message to {} clients", required_clients.len());
-                for client in required_clients {
-                    client.send_message(&name, &content).await?;
-                }
+                client
+                    .send_message_with_disguise(
+                        &content,
+                        MessageDisguise {
+                            name: Some(msg.author.clone()),
+                            avatar: msg.avatar.clone(),
+                        },
+                    )
+                    .await?;
             }
             // Seems unreachable now but is a catchall for future events.
             #[allow(unreachable_patterns)]

@@ -8,11 +8,11 @@ edition = "2021"
 [dependencies]
 dotenv = "0.15.0"
 env = "0.0.0"
-env_logger = "0.10.0"
+env_logger = "0.11.3"
 futures = "0.3.27"
 log = "0.4.17"
 models = { version = "0.1.0", path = "../models" }
-redis = { version = "0.22.3", features = ["tokio-comp"] }
+redis = { version = "0.25.3", features = ["tokio-comp"] }
 revolt-wrapper = { version = "0.1.0", path = "../revolt-wrapper" }
 serde_json = "1.0.94"
 serde_yaml = "0.9.21"

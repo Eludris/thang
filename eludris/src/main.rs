@@ -1,14 +1,15 @@
 mod handle_events;
 mod handle_redis;
 
-use eludrs::{GatewayClient, HttpClient};
+use eludrs::HttpClient;
 use futures::future::{abortable, select_all};
 use futures_util::FutureExt;
 use models::{Config, Result};
 use redis::AsyncCommands;
-use std::{collections::HashMap, env};
+use std::env;
 
 const DEFAULT_REDIS_URL: &str = "redis://127.0.0.1:6379";
+const URL: &str = "https://api.eludris.gay";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -17,67 +18,40 @@ async fn main() -> Result<()> {
 
     let redis_url = env::var("REDIS_URL").unwrap_or_else(|_| DEFAULT_REDIS_URL.to_string());
     let config: Config = serde_yaml::from_str(&std::fs::read_to_string("./config.yml")?)?;
+    let token: String = env::var("ELUDRIS_TOKEN").expect("ELUDRIS_TOKEN must be set");
 
     let redis = redis::Client::open(redis_url)?;
     log::info!("Connected to Redis {}", redis.get_connection_info().addr);
 
-    let mut conn = redis.get_async_connection().await?;
+    let mut conn = redis.get_multiplexed_async_connection().await?;
     for channel in &config {
         if let Some(eludris) = &channel.eludris {
-            for url in eludris {
-                conn.set(format!("eludris:key:{}", url), &channel.name)
-                    .await?;
-            }
+            conn.set(format!("eludris:key:{}", eludris), &channel.name)
+                .await?;
             conn.sadd(format!("eludris:instances:{}", channel.name), eludris)
                 .await?;
         }
     }
 
-    let mut clients: HashMap<String, HttpClient> = HashMap::new();
-    let mut gateway: HashMap<String, GatewayClient> = HashMap::new();
-
-    for url in config
-        .iter()
-        .filter_map(|config| config.eludris.as_ref())
-        .flatten()
-    {
-        if clients.contains_key(url) {
-            continue;
-        }
-        let url = url
-            .replace("localhost", "172.17.0.1")
-            .replace("127.0.0.1", "172.17.0.1");
-        let client = HttpClient::new().rest_url(url.to_string());
-        let gateway_url = client
-            .fetch_instance_info()
-            .await?
-            .pandemonium_url
-            .replace("localhost", "172.17.0.1");
-
-        clients.insert(url.to_string(), client);
-        gateway.insert(
-            url.to_string(),
-            GatewayClient::new().gateway_url(gateway_url),
-        );
-    }
+    let mut client = HttpClient::new(&token).rest_url(URL.to_string());
+    let gateway = client.create_gateway().await?;
+    let effis_url = client.get_instance_info().await?.effis_url.clone();
+    let self_id = client.get_user().await?.id;
 
     let mut futures = Vec::new();
 
     futures.push(
-        handle_redis::handle_redis(
-            redis.get_async_connection().await?,
-            redis.get_async_connection().await?,
-            clients,
-            config,
+        handle_events::handle_events(
+            redis.get_multiplexed_async_connection().await?,
+            gateway,
+            config[0].eludris.as_ref().unwrap().to_string(),
+            self_id,
+            effis_url,
         )
         .boxed(),
     );
-
-    for (url, gw) in gateway {
-        futures.push(
-            handle_events::handle_events(redis.get_async_connection().await?, gw, url).boxed(),
-        );
-    }
+    futures
+        .push(handle_redis::handle_redis(redis.get_async_pubsub().await?, client, config).boxed());
 
     let (output, index, futures) = select_all(futures).await;
 

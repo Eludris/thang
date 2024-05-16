@@ -4,7 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use futures::StreamExt;
 use models::{Event, Message};
 use models::{EventData, Result};
-use redis::{aio::Connection, AsyncCommands};
+use redis::aio::MultiplexedConnection;
+use redis::AsyncCommands;
 use revolt_wrapper::gateway::Events;
 use revolt_wrapper::models::{Channel, Member, MemberClear, User, UserClear};
 use revolt_wrapper::{Event as GatewayEvent, HttpClient};
@@ -13,7 +14,7 @@ use tokio::sync::Mutex;
 async fn get_server_id(
     channel: &str,
     http: &HttpClient,
-    conn: &Mutex<Connection>,
+    conn: &Mutex<MultiplexedConnection>,
 ) -> Result<String> {
     let mut conn = conn.lock().await;
 
@@ -37,7 +38,7 @@ async fn get_member(
     server: &str,
     member: &str,
     http: &HttpClient,
-    conn: &Mutex<Connection>,
+    conn: &Mutex<MultiplexedConnection>,
 ) -> Result<Member> {
     let mut conn = conn.lock().await;
 
@@ -66,7 +67,11 @@ async fn get_member(
     Ok(member)
 }
 
-async fn get_user(user: &str, http: &HttpClient, conn: &Mutex<Connection>) -> Result<User> {
+async fn get_user(
+    user: &str,
+    http: &HttpClient,
+    conn: &Mutex<MultiplexedConnection>,
+) -> Result<User> {
     let mut conn = conn.lock().await;
 
     let user = match conn.get(format!("user:{}", user)).await? {
@@ -90,7 +95,7 @@ async fn get_name(
     channel: &str,
     user: &str,
     http: &HttpClient,
-    conn: &Mutex<Connection>,
+    conn: &Mutex<MultiplexedConnection>,
 ) -> Result<String> {
     let server = get_server_id(channel, http, conn).await?;
     let member = get_member(&server, user, http, conn).await?;
@@ -106,7 +111,7 @@ async fn get_avatar(
     channel: &str,
     user: &str,
     http: &HttpClient,
-    conn: &Mutex<Connection>,
+    conn: &Mutex<MultiplexedConnection>,
 ) -> Result<Option<String>> {
     let server = get_server_id(channel, http, conn).await?;
     let member = get_member(&server, user, http, conn).await?;
@@ -120,7 +125,7 @@ async fn get_avatar(
 
 async fn handle_event(
     event: GatewayEvent,
-    conn: Arc<Mutex<Connection>>,
+    conn: Arc<Mutex<MultiplexedConnection>>,
     bot_id: String,
     http: Arc<HttpClient>,
 ) -> Result<()> {
@@ -193,7 +198,8 @@ async fn handle_event(
         GatewayEvent::ServerMemberLeave { id, user } => {
             conn.lock()
                 .await
-                .del::<&str, ()>(format!("servers:{}:member:{}", id, user).as_str());
+                .del::<&str, ()>(format!("servers:{}:member:{}", id, user).as_str())
+                .await?;
 
             return Ok(());
         }
@@ -219,7 +225,7 @@ async fn handle_event(
         _ => return Ok(()),
     };
 
-    let mut conn: tokio::sync::MutexGuard<Connection> = conn.lock().await;
+    let mut conn = conn.lock().await;
     let channel_name = conn
         .get::<String, Option<String>>(format!("revolt:key:{}", channel_id))
         .await
@@ -243,7 +249,7 @@ async fn handle_event(
 
 pub async fn handle_events(
     events: &mut Events,
-    conn: Connection,
+    conn: MultiplexedConnection,
     bot_id: String,
     http: Arc<HttpClient>,
 ) -> Result<()> {
